@@ -251,6 +251,9 @@ class DataService {
 		return tempIndex;
 	}
 
+	// Congratulations Traveler on making it this far! I have a small reward for you:
+	// https://www.youtube.com/watch?v=dz1MhkbPthI enjoy :)
+
 	public getBanner = (): BannerData => {
 		return this.bannerData;
 	};
