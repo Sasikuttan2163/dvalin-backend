@@ -1,5 +1,10 @@
 import axios from 'axios';
-import { CharacterItem, Index, WeaponItem } from '../types/models/dataIndex';
+import {
+	AchievementCategoryItem,
+	CharacterItem,
+	Index,
+	WeaponItem
+} from '../types/models/dataIndex';
 import { queryGitHubFolder } from '../utils/github';
 import { Result, ok, err } from 'neverthrow';
 import { logToConsole } from '../utils/log';
@@ -20,7 +25,7 @@ interface FileInfo {
 }
 
 class DataService {
-	private index: Index = { Character: {}, Weapon: {} };
+	private index: Index = { Character: {}, Weapon: {}, AchievementCategory: {} };
 	private bkTree: BKTree = new BKTree(optimizedFuzzyLCS);
 	private bannerData: BannerData = undefined;
 
@@ -30,7 +35,11 @@ class DataService {
 			return err(indexResult.error);
 		}
 		this.index = indexResult.value;
-		const indexes = [...Object.keys(this.index.Character), ...Object.keys(this.index.Weapon)];
+		const indexes = [
+			...Object.keys(this.index.Character),
+			...Object.keys(this.index.Weapon),
+			...Object.keys(this.index.AchievementCategory)
+		];
 		indexes.forEach((key) => this.bkTree.insert(key));
 		const dataResult = await getBannerData();
 		if (dataResult.isOk()) {
@@ -50,9 +59,17 @@ class DataService {
 		if (weaponResult.isErr()) {
 			return err(new Error('Failed to initialize Weapon data'));
 		}
+		const achievementCategoryResult = await this.tryFetchData(
+			'AchievementCategory',
+			config.DEBUG
+		);
+		if (achievementCategoryResult.isErr()) {
+			return err(new Error('Failed to initialize AchievementCategory data'));
+		}
 		return ok({
 			Character: characterResult.value.Character,
-			Weapon: weaponResult.value.Weapon
+			Weapon: weaponResult.value.Weapon,
+			AchievementCategory: achievementCategoryResult.value.AchievementCategory
 		});
 	}
 
@@ -69,7 +86,11 @@ class DataService {
 				return err(indexResult.error);
 			}
 			const newIndex = indexResult.value;
-			const indexes = [...Object.keys(newIndex.Character), ...Object.keys(newIndex.Weapon)];
+			const indexes = [
+				...Object.keys(newIndex.Character),
+				...Object.keys(newIndex.Weapon),
+				...Object.keys(newIndex.AchievementCategory)
+			];
 			indexes.forEach((key) => newBKTree.insert(key));
 			// pause all services and put the server in standby
 			syncUserProfileQueue.pause();
@@ -98,7 +119,7 @@ class DataService {
 	}
 
 	private async tryFetchData(
-		type: 'Character' | 'Weapon',
+		type: 'Character' | 'Weapon' | 'AchievementCategory',
 		isDev: boolean
 	): Promise<Result<Index, Error>> {
 		try {
@@ -117,7 +138,9 @@ class DataService {
 		}
 	}
 
-	private async getDevFiles(type: 'Character' | 'Weapon'): Promise<Result<FileInfo[], Error>> {
+	private async getDevFiles(
+		type: 'Character' | 'Weapon' | 'AchievementCategory'
+	): Promise<Result<FileInfo[], Error>> {
 		const dirPath = join('../dvalin-data/data/EN', type);
 		try {
 			const files = await readdir(dirPath);
@@ -131,7 +154,9 @@ class DataService {
 		}
 	}
 
-	private async getProdFiles(type: 'Character' | 'Weapon'): Promise<Result<FileInfo[], Error>> {
+	private async getProdFiles(
+		type: 'Character' | 'Weapon' | 'AchievementCategory'
+	): Promise<Result<FileInfo[], Error>> {
 		const filesResult = await queryGitHubFolder('EN', type);
 		if (filesResult.isErr()) {
 			return err(new Error(`Cannot query GitHub folder for ${type}`));
@@ -140,12 +165,12 @@ class DataService {
 	}
 
 	private async processFiles(
-		type: 'Character' | 'Weapon',
+		type: 'Character' | 'Weapon' | 'AchievementCategory',
 		files: FileInfo[],
 		isDev: boolean
 	): Promise<Result<Index, Error>> {
 		let processResult;
-		const index: Index = { Character: {}, Weapon: {} };
+		const index: Index = { Character: {}, Weapon: {}, AchievementCategory: {} };
 		for (const file of files.filter((f) => f.name !== 'index.json')) {
 			processResult = await this.processFile(type, file, isDev);
 			if (processResult.isErr()) {
@@ -158,7 +183,7 @@ class DataService {
 	}
 
 	private async processFile(
-		type: 'Character' | 'Weapon',
+		type: 'Character' | 'Weapon' | 'AchievementCategory',
 		file: FileInfo,
 		isDev: boolean
 	): Promise<Result<Index, Error>> {
@@ -175,28 +200,54 @@ class DataService {
 		}
 	}
 
-	private async getFileData(file: FileInfo, isDev: boolean): Promise<CharacterItem | WeaponItem> {
+	private async getFileData(
+		file: FileInfo,
+		isDev: boolean
+	): Promise<CharacterItem | WeaponItem | AchievementCategoryItem> {
 		if (isDev) {
 			const fileContent = await readFile(file.download_url, 'utf-8');
-			return JSON.parse(fileContent) as CharacterItem | WeaponItem;
+			return JSON.parse(fileContent) as CharacterItem | WeaponItem | AchievementCategoryItem;
 		}
-		const fileResponse = await axios.get<CharacterItem | WeaponItem>(file.download_url);
+		const fileResponse = await axios.get<CharacterItem | WeaponItem | AchievementCategoryItem>(
+			file.download_url
+		);
 		return fileResponse.data;
 	}
 
 	private createTypeIndex(
-		type: 'Character' | 'Weapon',
+		type: 'Character' | 'Weapon' | 'AchievementCategory',
 		fileName: string,
-		data: CharacterItem | WeaponItem
+		data: CharacterItem | WeaponItem | AchievementCategoryItem
 	): Index {
-		const tempIndex = { Character: {}, Weapon: {} };
-		tempIndex[type][fileName.replace('.json', '')] = {
-			name: data.name,
-			rarity: data.rarity,
-			element: 'element' in data ? data.element : undefined, // only on characters
-			weaponType: 'weaponType' in data ? data.weaponType : data.type, // only on characters
-			type: 'type' in data ? data.type : undefined // only on weapons
-		};
+		const tempIndex = { Character: {}, Weapon: {}, AchievementCategory: {} };
+		if (type === 'AchievementCategory') {
+			tempIndex[type][fileName.replace('.json', '')] = {
+				name: data.name,
+				id: 'id' in data ? data.id : undefined,
+				order: 'order' in data ? data.order : undefined,
+				achievementCount:
+					'achievements' in data ? Object.keys(data.achievements).length : undefined
+			};
+			return tempIndex;
+		}
+
+		if ('type' in data) {
+			tempIndex[type][fileName.replace('.json', '')] = {
+				name: data.name,
+				rarity: 'rarity' in data ? data.rarity : undefined,
+				element: 'element' in data ? data.element : undefined, // only on characters
+				weaponType: 'weaponType' in data ? data.weaponType : data.type, // only on characters
+				type: 'type' in data ? data.type : undefined // only on weapons
+			};
+		} else {
+			tempIndex[type][fileName.replace('.json', '')] = {
+				name: data.name,
+				rarity: 'rarity' in data ? data.rarity : undefined,
+				element: 'element' in data ? data.element : undefined, // only on characters
+				weaponType: 'weaponType' in data ? data.weaponType : undefined, // only on characters
+				type: 'type' in data ? data.type : undefined // only on weapons
+			};
+		}
 		return tempIndex;
 	}
 
